@@ -9,7 +9,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var VERSION = '1.0.0';
+  var VERSION = '1.0.1';
   var ATTR = 'data-pageflow';
 
   // Lifecycle, in the order hooks run during a page change.
@@ -60,6 +60,7 @@
   var scriptRegistry = null;   // texts and srcs of scripts that belong to the current page
   var loadedSrcs = new Set();
   var ownSrc = (document.currentScript && document.currentScript.src) || '';
+  var initialRecords = [];   // listeners/intervals added by scripts during the first page load
   var liveRegion = null;
 
   function assign(target) {
@@ -629,6 +630,8 @@
 
     return Promise.all(chunkLoads).then(function () {
       try { W.destroy(); } catch (e) { log('Webflow.destroy failed', e); }
+      // destroy() reverts GSAP state; put persistent elements straight back so nothing jumps.
+      restorePersistentState(persistent);
 
       if (!entries.length) {
         // No bundle to execute (e.g. exported site with a single webflow.js): restart in place.
@@ -645,6 +648,10 @@
       }
 
       window.Webflow = [];
+      // IX3 re-applies starting states when the bundle registers its interactions; undo that for
+      // persistent elements in the same task, before the browser paints.
+      var onIx3Ready = function () { restorePersistentState(persistent); };
+      window.addEventListener('__wf_ix3_ready', onIx3Ready, { once: true });
       var hadIx3 = !!snapshot;
       var ready = hadIx3 ? waitForIx3Ready(3000) : Promise.resolve(true);
       return entries.reduce(function (p, s) {
@@ -825,6 +832,49 @@
     }, Promise.resolve());
   }
 
+  // Code that ran natively on the first page load wasn't run by Pageflow, so it couldn't be tracked
+  // the usual way. While the document parses, listeners and intervals are recorded per script; on
+  // the first page change, the ones from scripts the next page doesn't share (page-level code) are
+  // removed, the same rule used to decide what re-runs.
+  function trackInitialLoad() {
+    if (document.readyState !== 'loading') return;
+    var origWin = window.addEventListener, origDoc = document.addEventListener, origInterval = window.setInterval;
+    function owner() {
+      var s = document.currentScript;
+      if (!s || isPlatformScript(s) || s.hasAttribute(ATTR + '-skip')) return null;
+      return scriptKey(s);
+    }
+    function patch(target, orig) {
+      return function (type, handler, options) {
+        var key = this === target ? owner() : null;
+        if (key) initialRecords.push({ key: key, undo: function () { target.removeEventListener(type, handler, options); } });
+        return orig.apply(this, arguments);
+      };
+    }
+    window.addEventListener = patch(window, origWin);
+    document.addEventListener = patch(document, origDoc);
+    window.setInterval = function () {
+      var id = origInterval.apply(window, arguments);
+      var key = owner();
+      if (key) initialRecords.push({ key: key, undo: function () { clearInterval(id); } });
+      return id;
+    };
+    origDoc.call(document, 'DOMContentLoaded', function () {
+      window.addEventListener = origWin;
+      document.addEventListener = origDoc;
+      window.setInterval = origInterval;
+    });
+  }
+
+  function cleanupInitialLoad(nextDoc) {
+    if (!initialRecords.length || !opts.autoCleanup) { initialRecords = []; return; }
+    var next = registryFrom(nextDoc);
+    initialRecords.forEach(function (r) {
+      if (!next.has(r.key)) { try { r.undo(); } catch (e) {} }
+    });
+    initialRecords = [];
+  }
+
   function runCleanups() {
     var fns = activeCleanups.splice(0);
     fns.forEach(function (fn) { try { fn(); } catch (e) { console.error(e); } });
@@ -931,6 +981,7 @@
       })
       .then(function () {
         runCleanups();
+        cleanupInitialLoad(ctx.nextDoc);
         var oldContainer = ctx.current.container;
         var nextContainer = ctx.next.container;
         // Hidden until its enter animation starts, so it can't flash while Webflow re-initialises.
@@ -1131,6 +1182,7 @@
     init();
   }
   if (typeof document !== 'undefined') {
+    trackInitialLoad();
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', autoStart);
     else setTimeout(autoStart, 0);
   }

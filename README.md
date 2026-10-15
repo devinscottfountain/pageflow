@@ -215,6 +215,27 @@ Pageflow.destroy()               // stop handling links
 - **Reduced motion:** presets become instant for visitors who ask for reduced motion.
 - **If anything fails** (network error, missing container, a script throws during the swap), Pageflow falls back to a normal page load.
 
+## Tests
+
+End-to-end tests run in headless Chromium (Playwright) against a published Webflow test site that uses IX3, a Webflow form, an HTML embed, and site- and page-level custom code.
+
+```bash
+npm install
+npx playwright install chromium
+npm test            # builds dist/, then tests it on the live Webflow site
+npm run test:cdn    # tests the release published on jsDelivr instead
+```
+
+`npm test` serves the site's Pageflow `<script>` from your local `dist/` build, so it checks your working copy against real Webflow, IX3 and GSAP. Point it at another site with `PAGEFLOW_SITE=https://your-site.webflow.io`. That site needs the same structure as the test site (`.pf-nav` links `#nav-home`, `#nav-about`, `#nav-contact`, `#nav-contact-fade`; `.pf-panel`; `.pf-title`) and its custom code.
+
+| Suite | Covers |
+|---|---|
+| `tests/presets.spec.js` | `fade`, `slide-up`, `slide-left`, `overlay`, `none`, link attributes, reduced motion, hook order |
+| `tests/ix3.spec.js` | Panel covers the page through the swap; waiting for IX3 timelines; IX3 re-registration and page-load replays; repeated transitions; back/forward |
+| `tests/custom-code.spec.js` | Site code runs once; `Pageflow.page()`; page code re-runs with `const` and `DOMContentLoaded`; interval cleanup; embeds; page head styles; head/`data-wf-page` sync; Webflow forms; `Pageflow.transition()`; from/to rules; `data-pageflow-prevent`; queued clicks |
+
+Transitions are checked frame by frame: every animation frame records each container's opacity and transform, the IX3 panel's position, and the title's opacity.
+
 ## How it works
 
 On each page change Pageflow fetches the next page, runs the leave animation, swaps the container, and updates the head. It then calls `Webflow.destroy()`, clears `window.Webflow`, and runs the incoming page's own `webflow.*.js` bundle again. That bundle re-defines Webflow's modules, starts IX2, and re-registers the page's IX3 interactions against the new DOM. Finally it runs page-level custom code and the enter animation.
