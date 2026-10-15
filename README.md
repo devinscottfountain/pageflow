@@ -13,7 +13,7 @@ No dependencies. ~8 KB gzipped.
 ### 1. Add the script (Project settings → Custom code → Head code)
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/devinscottfountain/pageflow@1.0.0/dist/pageflow.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/devinscottfountain/pageflow@1.0.1/dist/pageflow.min.js"></script>
 ```
 
 ### 2. Mark the part of the page that changes
