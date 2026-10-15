@@ -1,0 +1,27 @@
+{
+  "name": "pageflow-webflow",
+  "version": "1.0.0",
+  "description": "Page transitions for Webflow that keep IX3/IX2 interactions, Webflow components and custom code working.",
+  "main": "dist/pageflow.min.js",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "terser src/pageflow.js --compress --mangle --comments '/^!/' --source-map \"url='pageflow.min.js.map'\" -o dist/pageflow.min.js",
+    "test:serve": "python3 -m http.server 8766"
+  },
+  "keywords": [
+    "webflow",
+    "page-transitions",
+    "ix3",
+    "gsap",
+    "barba"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devinscottfountain/pageflow.git"
+  },
+  "homepage": "https://github.com/devinscottfountain/pageflow"
+}
