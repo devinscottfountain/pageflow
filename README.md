@@ -13,7 +13,7 @@ No dependencies. ~8 KB gzipped.
 ### 1. Add the script (Project settings → Custom code → Head code)
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/devinscottfountain/pageflow@1.0.1/dist/pageflow.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/devinscottfountain/pageflow@1.0.2/dist/pageflow.min.js"></script>
 ```
 
 ### 2. Mark the part of the page that changes
@@ -27,6 +27,21 @@ In the Designer, select the element that wraps each page's content (usually a `m
 Do this on every page (or put it in a component used on every page). Pages without a container load normally.
 
 That's it: links between pages now fade. Publish and click around.
+
+### 3. Optional: set site-wide defaults
+
+Add this to **Project settings → Custom code** (head or footer) to pick the transition and speed for the whole site in one place, instead of adding attributes to every page:
+
+```html
+<script>
+  window.PageflowConfig = {
+    transition: 'slide-up',
+    duration: 800
+  };
+</script>
+```
+
+This is the bottom of the inheritance order: any `data-pageflow-transition` or `data-pageflow-duration` attribute on a link, page or the Body overrides it. Every [option](#options) can go here. `window.pageflowConfig` works too, as do `animation` and `speed` in place of `transition` and `duration`. A misspelled option name logs a warning in the console.
 
 ## Choosing a transition
 
@@ -46,13 +61,16 @@ Where you put the attribute decides when it applies, most specific first:
 1. **On a link**: only clicks on that link
 2. **On the incoming page's container**: every visit *to* that page
 3. **On the outgoing page's container**: every visit *from* that page
-4. **On the Body element**: site-wide default
+4. **On the Body element**: that page's default
+5. **`window.PageflowConfig`**: the whole site's default ([site-wide defaults](#3-optional-set-site-wide-defaults))
+
+`data-pageflow-duration` follows the same order.
 
 Other attributes:
 
 | Attribute | Where | Effect |
 |---|---|---|
-| `data-pageflow-duration="600"` | link, container or `<html>` | Preset length in ms (IX3: how long to wait) |
+| `data-pageflow-duration="600"` | link, container, Body or `<html>` | Preset length in ms (IX3: how long to wait instead of detecting it) |
 | `data-pageflow-namespace="work"` | container | Names the page for rules and `Pageflow.page()`; defaults to the Webflow page ID |
 | `data-pageflow-prevent` | link | That link loads the page normally |
 | `data-pageflow-prevent="all"` | any element | Every link inside it loads normally |
@@ -173,12 +191,12 @@ In page-level code you can register cleanup with `Pageflow.onLeave(fn)`.
 
 ## Options
 
-Pass to `Pageflow.init({...})` in footer code, or set `window.PageflowConfig = {...}` before the script loads.
+Set them site-wide with `window.PageflowConfig = {...}` in head or footer code (see [site-wide defaults](#3-optional-set-site-wide-defaults)), or pass them to `Pageflow.init({...})` in footer code. `init()` options win over `PageflowConfig`.
 
 | Option | Default | |
 |---|---|---|
 | `transition` | `'fade'` | Default preset |
-| `duration` | `400` | Preset length (ms) |
+| `duration` | `400` | Preset length (ms). IX3 transitions detect their own length unless an attribute sets it |
 | `easing` | `'cubic-bezier(0.65, 0, 0.35, 1)'` | Preset easing |
 | `overlayColor` | `'#000'` | Colour of the built-in overlay |
 | `prefetch` | `true` | Preload pages on hover, touch and keyboard focus |
@@ -232,6 +250,7 @@ npm run test:cdn    # tests the release published on jsDelivr instead
 |---|---|
 | `tests/presets.spec.js` | `fade`, `slide-up`, `slide-left`, `overlay`, `none`, link attributes, reduced motion, hook order |
 | `tests/ix3.spec.js` | Panel covers the page through the swap; waiting for IX3 timelines; IX3 re-registration and page-load replays; repeated transitions; back/forward |
+| `tests/config.spec.js` | `PageflowConfig` / `pageflowConfig` defaults, `animation`/`speed` names, attributes overriding config, duration on the incoming container and Body, unknown-option warnings |
 | `tests/custom-code.spec.js` | Site code runs once; `Pageflow.page()`; page code re-runs with `const` and `DOMContentLoaded`; interval cleanup; embeds; page head styles; head/`data-wf-page` sync; Webflow forms; `Pageflow.transition()`; from/to rules; `data-pageflow-prevent`; queued clicks |
 
 Transitions are checked frame by frame: every animation frame records each container's opacity and transform, the IX3 panel's position, and the title's opacity.

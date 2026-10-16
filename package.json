@@ -1,6 +1,6 @@
 {
   "name": "pageflow-webflow",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Page transitions for Webflow that keep IX3/IX2 interactions, Webflow components and custom code working.",
   "main": "dist/pageflow.min.js",
   "files": [

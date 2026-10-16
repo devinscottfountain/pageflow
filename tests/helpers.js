@@ -2,23 +2,40 @@ const path = require('path');
 const { expect } = require('@playwright/test');
 
 const LOCAL_BUILD = path.join(__dirname, '..', 'dist', 'pageflow.min.js');
+const SITE = process.env.PAGEFLOW_SITE || 'https://devins-superb-site-3f731d.webflow.io';
 
 // Opens a page of the test site with Pageflow running and test instrumentation installed.
-async function open(page, pathname = '/') {
+//   config:  object assigned to window[configName] before any page script runs
+//   rewrite: (html) => html, applied to every page of the site (first load and Pageflow's fetches)
+async function open(page, pathname = '/', { config, configName = 'PageflowConfig', rewrite } = {}) {
   const errors = [];
+  const warnings = [];
   page.on('pageerror', (err) => errors.push(err.message));
+  page.on('console', (msg) => { if (msg.type() === 'warning') warnings.push(msg.text()); });
 
   if (!process.env.PAGEFLOW_CDN) {
     await page.route(/\/pageflow(\.min)?\.js(\?|$)/, (route) =>
       route.fulfill({ path: LOCAL_BUILD, contentType: 'application/javascript' })
     );
   }
+  if (config) {
+    await page.addInitScript(([name, value]) => { window[name] = value; }, [configName, config]);
+  }
+  if (rewrite) {
+    const origin = new URL(SITE).origin;
+    await page.route((url) => url.origin === origin, async (route) => {
+      const response = await route.fetch();
+      const type = response.headers()['content-type'] || '';
+      if (!type.includes('text/html')) return route.fulfill({ response });
+      route.fulfill({ response, body: rewrite(await response.text()) });
+    });
+  }
 
   await page.goto(pathname);
   await page.waitForFunction(() => window.Pageflow && window.Pageflow.current);
   // Survives transitions, disappears on a full page load.
   await page.evaluate(() => { window.__marker = 'same-document'; });
-  return { errors };
+  return { errors, warnings };
 }
 
 // Starts recording, on every animation frame, what the page looks like during a transition.
@@ -99,4 +116,16 @@ function framesOf(samples, ns) {
 
 const HOOK_ORDER = ['before', 'beforeLeave', 'leave', 'afterLeave', 'beforeEnter', 'webflowReady', 'enter', 'afterEnter', 'after'];
 
-module.exports = { open, transition, go, click, expectSameDocument, framesOf, HOOK_ORDER };
+// Records when each hook fires, to measure how long the leave and enter phases took.
+async function timeHooks(page) {
+  await page.evaluate(() => {
+    window.__times = {};
+    ['leave', 'afterLeave', 'enter', 'afterEnter'].forEach((h) => Pageflow.on(h, () => { window.__times[h] = performance.now(); }));
+  });
+  return async () => {
+    const t = await page.evaluate(() => window.__times);
+    return { leave: t.afterLeave - t.leave, enter: t.afterEnter - t.enter };
+  };
+}
+
+module.exports = { SITE, open, transition, go, click, expectSameDocument, framesOf, timeHooks, HOOK_ORDER };

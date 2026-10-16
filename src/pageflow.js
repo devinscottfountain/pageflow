@@ -9,7 +9,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var VERSION = '1.0.1';
+  var VERSION = '1.0.2';
   var ATTR = 'data-pageflow';
 
   // Lifecycle, in the order hooks run during a page change.
@@ -277,9 +277,19 @@
     return { el: el, own: true };
   }
 
-  function presetTiming(ctx) {
+  // Same order as the transition itself: link, incoming page, outgoing page, <body>, <html>, config.
+  function attrDuration(ctx) {
     var el = ctx.trigger && ctx.trigger.nodeType === 1 ? ctx.trigger : null;
-    var d = parseInt(attr(el, 'duration') || attr(ctx.current.container, 'duration') || attr(document.documentElement, 'duration'), 10);
+    return parseInt(
+      attr(el, 'duration') ||
+      attr(ctx.next.container, 'duration') ||
+      attr(ctx.current.container, 'duration') ||
+      attr(document.body, 'duration') ||
+      attr(document.documentElement, 'duration'), 10);
+  }
+
+  function presetTiming(ctx) {
+    var d = attrDuration(ctx);
     var duration = reducedMotion() ? 0 : (isNaN(d) ? opts.duration : d);
     return { duration: duration, easing: opts.easing };
   }
@@ -439,8 +449,7 @@
       log('IX3 not available, skipping', phase);
       return Promise.resolve();
     }
-    var el = ctx.trigger && ctx.trigger.nodeType === 1 ? ctx.trigger : null;
-    var override = parseInt(attr(el, 'duration') || attr(ctx.next.container, 'duration') || attr(document.documentElement, 'duration'), 10);
+    var override = attrDuration(ctx);
     var estimate = isNaN(override) ? estimateIx3Duration(eventName) : override;
     var gsap = window.gsap;
     // Which timelines existed before the event, and whether they could be the ones it starts:
@@ -1106,9 +1115,34 @@
   // Start / stop
   // ---------------------------------------------------------------------------
 
+  // Option names people reach for that mean the same thing as an existing option.
+  var OPTION_ALIASES = { animation: 'transition', speed: 'duration' };
+
+  // Normalises an options object: applies aliases and warns about names Pageflow doesn't know,
+  // so a typo in site-wide config doesn't fail silently.
+  function normaliseOptions(o, source) {
+    var out = {};
+    if (!o) return out;
+    Object.keys(o).forEach(function (k) {
+      var key = OPTION_ALIASES[k] || k;
+      if (!Object.prototype.hasOwnProperty.call(defaults, key)) {
+        console.warn('[Pageflow] Unknown option "' + k + '" in ' + source + '.');
+        return;
+      }
+      // An explicit name wins over its alias when both are given.
+      if (key !== k && Object.prototype.hasOwnProperty.call(o, key)) return;
+      out[key] = o[k];
+    });
+    return out;
+  }
+
   function init(options) {
-    if (started) { assign(opts, options || {}); return api; }
-    assign(opts, window.PageflowConfig || {}, options || {});
+    if (started) { assign(opts, normaliseOptions(options, 'Pageflow.init()')); return api; }
+    // Site-wide defaults: window.PageflowConfig (or window.pageflowConfig), then init() options.
+    assign(opts,
+      normaliseOptions(window.PageflowConfig, 'window.PageflowConfig'),
+      normaliseOptions(window.pageflowConfig, 'window.pageflowConfig'),
+      normaliseOptions(options, 'Pageflow.init()'));
     if (!window.history || !window.history.pushState || !window.fetch || !window.DOMParser) return api;
     // Not in the Webflow Editor, where the page must stay a normal document.
     if (/[?&]edit\b/.test(location.search) || document.documentElement.classList.contains('w-editor')) return api;

@@ -10,7 +10,7 @@ module.exports = defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: [['list']],
   use: {
-    baseURL: process.env.PAGEFLOW_SITE || 'https://devins-superb-site-3f731d.webflow.io',
+    baseURL: require('./tests/helpers').SITE,
     viewport: { width: 1280, height: 800 },
     trace: 'retain-on-failure'
   },
