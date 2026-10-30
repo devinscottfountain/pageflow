@@ -9,7 +9,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var VERSION = '1.0.2';
+  var VERSION = '1.0.3';
   var ATTR = 'data-pageflow';
 
   // Lifecycle, in the order hooks run during a page change.

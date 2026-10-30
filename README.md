@@ -13,7 +13,7 @@ No dependencies. ~8 KB gzipped.
 ### 1. Add the script (Project settings → Custom code → Head code)
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/devinscottfountain/pageflow@1.0.2/dist/pageflow.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/devinscottfountain/pageflow@1.0.3/dist/pageflow.min.js"></script>
 ```
 
 ### 2. Mark the part of the page that changes
@@ -229,6 +229,7 @@ Pageflow.destroy()               // stop handling links
 - **What changes:** only the container. The nav, footer and anything else outside it stay as they are, so keep elements that should persist (nav, transition overlay, music player) outside the container.
 - **`<head>` updates:** title, description, Open Graph/Twitter tags, canonical, JSON-LD, `<html lang>`, the Webflow page attributes, and the body's classes and attributes. Page-level `<style>` tags in the head are added on arrival; mark one `data-pageflow-page-style` and it will also be removed when you leave.
 - **IX3 page-load interactions** play again on every page, the same as a normal load. Scroll-triggered animations are refreshed.
+- **Clicking during a transition:** a click before the new page is swapped in redirects the running transition to the new link (one transition, not two). A click after the swap runs once the current one finishes.
 - **Webflow Editor:** Pageflow switches itself off there.
 - **Reduced motion:** presets become instant for visitors who ask for reduced motion.
 - **If anything fails** (network error, missing container, a script throws during the swap), Pageflow falls back to a normal page load.
@@ -257,4 +258,4 @@ Transitions are checked frame by frame: every animation frame records each conta
 
 ## How it works
 
-On each page change Pageflow fetches the next page, runs the leave animation, swaps the container, and updates the head. It then calls `Webflow.destroy()`, clears `window.Webflow`, and runs the incoming page's own `webflow.*.js` bundle again. That bundle re-defines Webflow's modules, starts IX2, and re-registers the page's IX3 interactions against the new DOM. Finally it runs page-level custom code and the enter animation.
+On each page change Pageflow fetches the next page, runs the leave animation, swaps the container, and updates the head. It then calls `Webflow.destroy()`, clears `window.Webflow`, and runs the incoming page's own Webflow bundle again (`webflow.<hash>.js`, or `<site-name>.<hash>.js` on sites where Webflow names bundles after the site). That bundle re-defines Webflow's modules, starts IX2, and re-registers the page's IX3 interactions against the new DOM. Finally it runs page-level custom code and the enter animation.
