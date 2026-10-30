@@ -545,12 +545,15 @@
   // Webflow re-initialisation
   // ---------------------------------------------------------------------------
 
-  function isWebflowEntry(src) {
-    return /\/js\/webflow\.[^/]*\.js(\?|$)/.test(src) && !/webflow\.[a-z]*chunk\./.test(src);
+  // Webflow names its bundles after the site on some sites ("my-site.schunk.<hash>.js",
+  // "my-site.<hash>.<hash>.js") and "webflow.*" on others, so match the hashed shape too.
+  function isWebflowChunk(src) {
+    return /\/js\/[^/?]+\.[a-z]*chunk\.[0-9a-f]+\.js(\?|$)/i.test(src);
   }
 
-  function isWebflowChunk(src) {
-    return /\/js\/webflow\.[a-z]*chunk\.[^/]*\.js(\?|$)/.test(src);
+  function isWebflowEntry(src) {
+    if (isWebflowChunk(src)) return false;
+    return /\/js\/webflow\.[^/]*\.js(\?|$)/.test(src) || /\/js\/[^/?]+\.[0-9a-f]{8}\.[0-9a-f]{8,}\.js(\?|$)/i.test(src);
   }
 
   function isOwnScript(src) {
@@ -889,11 +892,6 @@
     fns.forEach(function (fn) { try { fn(); } catch (e) { console.error(e); } });
   }
 
-  function runCleanups() {
-    var fns = activeCleanups.splice(0);
-    fns.forEach(function (fn) { try { fn(); } catch (e) { console.error(e); } });
-  }
-
   // ---------------------------------------------------------------------------
   // Page handlers
   //   Pageflow.page(fn)               run on every page (first load and after each transition)
@@ -939,11 +937,16 @@
   // Navigation
   // ---------------------------------------------------------------------------
 
+  var active = null;           // context of the page change in progress
+
   function navigate(href, o) {
     o = o || {};
     if (!started) { location.href = href; return Promise.resolve(); }
     if (running) {
-      // Remember only the latest request and run it when the current transition finishes.
+      // Until the new page is swapped in, a second request just changes where the running
+      // transition is headed, so there's one transition instead of two back to back.
+      if (active && !active.swapped) { retarget(active, href, o); return Promise.resolve(); }
+      // After the swap, remember only the latest request and run it when this one finishes.
       pendingNav = { href: href, o: o };
       return Promise.resolve();
     }
@@ -951,13 +954,15 @@
     document.documentElement.classList.add('pageflow-running');
 
     var push = o.push !== false;
-    var ctx = {
+    var ctx = active = {
       trigger: o.trigger || 'api',
       direction: o.direction || 'forward',
       requested: o.transition || null,
       current: { url: current.url, namespace: current.namespace, container: current.container },
-      next: { url: href, namespace: null, container: null }
+      next: { url: href, namespace: null, container: null },
+      swapped: false
     };
+    ctx._o = o;
 
     if (push) {
       saveScroll();
@@ -965,13 +970,13 @@
       history.pushState({ pageflow: true, index: historyIndex, scroll: { x: 0, y: 0 } }, '', href);
     }
 
-    var fetching = request(href);
+    ctx.fetching = request(href);
     var transition;
 
     return emit('before', ctx)
       .then(function () {
         // The transition can depend on the incoming page, so wait for it (usually already prefetched on hover).
-        return fetching.then(parseInto(ctx));
+        return settle(ctx);
       })
       .then(function () {
         transition = ctx.transition = resolveTransition(ctx);
@@ -979,16 +984,18 @@
       })
       .then(function () {
         if (transition.sync) return null;
-        return Promise.all([emit('leave', ctx).then(function () { return call(transition.leave, ctx); }), fetching.then(parseInto(ctx))]);
+        return Promise.all([emit('leave', ctx).then(function () { return call(transition.leave, ctx); }), settle(ctx)]);
       })
-      .then(function () {
-        if (transition.sync) return fetching.then(parseInto(ctx));
-      })
+      .then(function () { return settle(ctx); })
       .then(function () {
         if (!ctx.next.container) throw new Error('No ' + opts.container + ' on the incoming page');
         return emit('afterLeave', ctx);
       })
+      // A retarget during afterLeave needs its page parsed before the swap.
+      .then(function () { return settle(ctx); })
       .then(function () {
+        if (!ctx.next.container) throw new Error('No ' + opts.container + ' on the incoming page');
+        ctx.swapped = true;
         runCleanups();
         cleanupInitialLoad(ctx.nextDoc);
         var oldContainer = ctx.current.container;
@@ -1003,7 +1010,7 @@
         syncHead(ctx.nextDoc);
         syncRootAttributes(ctx.nextDoc);
         current = { url: ctx.next.url, namespace: ctx.next.namespace, container: nextContainer };
-        if (!transition.sync) restoreScroll(o, ctx);
+        if (!transition.sync) restoreScroll(ctx._o, ctx);
         return emit('beforeEnter', ctx);
       })
       .then(function () {
@@ -1011,7 +1018,7 @@
           return Promise.all([
             call(transition.leave, ctx).then(function () { ctx.current.container.remove(); }),
             afterSwap(ctx).then(function () { return emit('enter', ctx); }).then(function () { return startEnter(transition, ctx); })
-          ]).then(function () { restoreScroll(o, ctx); });
+          ]).then(function () { restoreScroll(ctx._o, ctx); });
         }
         return afterSwap(ctx)
           .then(function () { return emit('enter', ctx); })
@@ -1026,11 +1033,13 @@
         console.error('[Pageflow] Navigation failed, loading the page normally.', err);
         emit('error', { error: err, ctx: ctx });
         running = false;
-        location.href = href;
+        active = null;
+        location.href = ctx.next.url;
         return new Promise(function () {}); // stop here; the browser is navigating
       })
       .then(function () {
         running = false;
+        active = null;
         document.documentElement.classList.remove('pageflow-running');
         if (pendingNav) {
           var p = pendingNav; pendingNav = null;
@@ -1043,6 +1052,28 @@
     var p = call(transition.enter, ctx);
     ctx.next.container.style.visibility = '';
     return p;
+  }
+
+  // Points the running page change at another URL. Only called before the swap, so the leave
+  // animation carries on and the new page is swapped in when it ends.
+  function retarget(ctx, href, o) {
+    if (cleanHref(href) === cleanHref(ctx.next.url)) return;
+    log('retarget', ctx.next.url, '→', href);
+    if (o.push !== false) history.replaceState(history.state, '', href);
+    ctx.next = { url: href, namespace: null, container: null };
+    ctx.nextDoc = null;
+    ctx._o = o;
+    if (o.trigger) ctx.trigger = o.trigger;
+    ctx.fetching = request(href);
+  }
+
+  // Resolves once the newest requested page is parsed into ctx, following any retargets.
+  function settle(ctx) {
+    var f = ctx.fetching;
+    return f.then(function (res) {
+      if (ctx.fetching !== f) return settle(ctx); // retargeted while this one loaded
+      parseInto(ctx)(res);
+    });
   }
 
   function parseInto(ctx) {
